@@ -1,0 +1,210 @@
+name: Generate Labels
+
+on:
+  workflow_dispatch:
+    inputs:
+      dates:
+        description: "日期: YYYYMMDD 或 YYYYMMDD~YYYYMMDD, 多个逗号分隔, 留空=当天"
+        required: false
+        type: string
+      force:
+        description: "强制生成 (已存在也重新生成)"
+        required: false
+        type: boolean
+        default: false
+
+env:
+  PYTHON_VERSION: "3.11"
+
+jobs:
+  label:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    if: github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Parse dates
+        id: dates
+        run: |
+          INPUT="${{ inputs.dates }}"
+          if [ -z "$INPUT" ]; then
+            INPUT=$(TZ=Asia/Shanghai date +%Y%m%d)
+          fi
+
+          DATES=""
+          IFS=',' read -ra PARTS <<< "$INPUT"
+          for part in "${PARTS[@]}"; do
+            part=$(echo "$part" | xargs)
+            if [[ "$part" == *"~"* ]]; then
+              START=$(echo "$part" | cut -d'~' -f1)
+              END=$(echo "$part" | cut -d'~' -f2)
+              CUR="$START"
+              while [[ "$CUR" -le "$END" ]]; do
+                DATES="${DATES:+$DATES,}$CUR"
+                CUR=$(date -d "${CUR:0:4}-${CUR:4:2}-${CUR:6:2} + 1 day" +%Y%m%d)
+              done
+            else
+              DATES="${DATES:+$DATES,}$part"
+            fi
+          done
+
+          echo "all=$DATES" >> "$GITHUB_OUTPUT"
+          echo "📅 展开日期: $DATES"
+
+      - name: Checkout stock-grabber
+        uses: actions/checkout@v4
+        with:
+          repository: hiyishui/stock-grabber
+          token: ${{ secrets.GRABBER_PAT }}
+          ref: main
+          path: stock-grabber
+          sparse-checkout: |
+            data/trade_date.json
+            labeling
+
+      - name: Filter trade dates & check existing
+        id: filter
+        shell: python3 {0}
+        env:
+          ALL_DATES: ${{ steps.dates.outputs.all }}
+          FORCE: ${{ inputs.force }}
+          HICCC_PAT: ${{ secrets.HICCC_PAT }}
+        run: |
+          import json, os, subprocess, sys
+
+          all_str = os.environ.get("ALL_DATES", "")
+          force = os.environ.get("FORCE", "false") == "true"
+          gh_output = os.environ["GITHUB_OUTPUT"]
+
+          # 加载交易日历
+          with open("stock-grabber/data/trade_date.json") as f:
+              td = json.load(f)
+          trade_set = set(d.replace("-", "") for d in td["trade_dates"])
+
+          # 筛选有效交易日
+          all_dates = [d.strip() for d in all_str.split(",") if d.strip()]
+          valid = sorted(d for d in all_dates if d in trade_set)
+
+          # 检查已存在的标签 (从 hicccx999/gp-{year} 仓库)
+          if not force:
+              import pathlib
+              hiccc_pat = os.environ.get("HICCC_PAT", "")
+              existing = set()
+              years = sorted(set(d[:4] for d in valid))
+              for year in years:
+                  repo = f"gp-{year}"
+                  clone_dir = f".work/check-{year}"
+                  try:
+                      subprocess.run([
+                          "git", "clone", "--depth", "1", "--filter=blob:none", "--sparse",
+                          f"https://x-access-token:{hiccc_pat}@github.com/hicccx999/{repo}.git",
+                          clone_dir
+                      ], check=True, capture_output=True)
+                      subprocess.run(
+                          ["git", "sparse-checkout", "set", "labels/"],
+                          cwd=clone_dir, check=True, capture_output=True
+                      )
+                      for p in pathlib.Path(clone_dir).joinpath("labels").rglob("labels_*.parquet"):
+                          existing.add(p.stem.replace("labels_", ""))
+                  except Exception:
+                      pass  # 仓库可能不存在, 跳过
+              before = len(valid)
+              valid = [d for d in valid if d not in existing]
+              print(f"⏭️ 跳过 {before - len(valid)} 已存在日期")
+
+          if not valid:
+              print("⏭️ 无待处理日期")
+              with open(gh_output, "a") as f:
+                  f.write("has_work=false\n")
+                  f.write("dates=\n")
+              sys.exit(0)
+
+          dates_str = ",".join(valid)
+          print(f"📅 {len(valid)} 个待处理交易日")
+          with open(gh_output, "a") as f:
+              f.write("has_work=true\n")
+              f.write(f"dates={dates_str}\n")
+
+      - name: Clone gp-features
+        if: steps.filter.outputs.has_work == 'true'
+        run: |
+          git clone \
+            "https://x-access-token:${{ secrets.LARKSELF_PAT }}@github.com/larkself/gp-features.git" \
+            .work/gp-features
+
+      - name: Setup Python
+        if: steps.filter.outputs.has_work == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        if: steps.filter.outputs.has_work == 'true'
+        run: pip install numpy pandas pyarrow
+
+      - name: Generate labels
+        if: steps.filter.outputs.has_work == 'true'
+        run: |
+          echo "🔄 生成标签: ${{ steps.filter.outputs.dates }}"
+          python3 stock-grabber/labeling/generate_labels.py \
+            --target-dates "${{ steps.filter.outputs.dates }}" \
+            --derived-dir .work/gp-features/derived \
+            --output-dir .work/labels \
+            --trade-date-json stock-grabber/data/trade_date.json
+
+      - name: Push labels to gp-{year} repos
+        if: steps.filter.outputs.has_work == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.HICCC_PAT }}
+        run: |
+          cd .work/labels
+          for year_dir in */; do
+            [ -d "$year_dir" ] || continue
+            YEAR="${year_dir%/}"
+            REPO="gp-${YEAR}"
+            REPO_URL="https://x-access-token:${GH_TOKEN}@github.com/hicccx999/${REPO}.git"
+
+            echo "📦 处理 ${YEAR} ..."
+
+            # 检查仓库是否存在，不存在则创建
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+              -H "Authorization: token ${GH_TOKEN}" \
+              "https://api.github.com/repos/hicccx999/${REPO}")
+
+            if [ "$HTTP_CODE" != "200" ]; then
+              echo "🆕 创建仓库 hicccx999/${REPO}"
+              curl -sf -X POST \
+                -H "Authorization: token ${GH_TOKEN}" \
+                -H "Accept: application/vnd.github+json" \
+                "https://api.github.com/user/repos" \
+                -d "{\"name\":\"${REPO}\",\"private\":true,\"auto_init\":true}"
+              sleep 3
+            fi
+
+            # 克隆仓库
+            git clone --depth 1 "${REPO_URL}" "../repo-${YEAR}"
+
+            # 复制标签文件
+            mkdir -p "../repo-${YEAR}/labels/${YEAR}"
+            cp "${year_dir}"*.parquet "../repo-${YEAR}/labels/${YEAR}/"
+
+            # 提交并推送
+            cd "../repo-${YEAR}"
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add labels/
+            if git diff --cached --quiet; then
+              echo "ℹ️ ${REPO} 无变更"
+            else
+              git commit -m "labels: batch update ${YEAR}"
+              for TRY in 1 2 3 4 5; do
+                git pull --rebase 2>/dev/null || true
+                if git push; then
+                  echo "✅ ${REPO} 推送成功"
+                  break
+                fi
+                echo "⚠️ push 失败, 重试 (${TRY}/5)"
+                sleep $((TRY * 3))
+              done
+            fi
+            cd ../labels
+          done
