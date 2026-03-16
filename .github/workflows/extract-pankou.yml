@@ -122,22 +122,21 @@ jobs:
             fi
           done
 
-          TRADE_DATES=$(python3 -c "
-          import json
+          export ALL_DATES="$ALL"
+          TRADING=$(python3 -c "
+          import json, os, sys
           with open('.work/stock-grabber/data/trade_date.json') as f:
               data = json.load(f)
-          for d in data['trade_dates']:
-              print(d.replace('-', ''))
+          trade_set = set(d.replace('-', '') for d in data['trade_dates'])
+          all_dates = os.environ['ALL_DATES'].split()
+          ok = []
+          for d in all_dates:
+              if d in trade_set:
+                  ok.append(d)
+              else:
+                  print(f'\u23ed\ufe0f {d} 非交易日, 跳过', file=sys.stderr)
+          print(' '.join(ok))
           ")
-
-          TRADING=""
-          for D in $ALL; do
-            if echo "$TRADE_DATES" | grep -qx "$D"; then
-              TRADING="${TRADING:+$TRADING }$D"
-            else
-              echo "⏭️ $D 非交易日, 跳过"
-            fi
-          done
           ALL="$TRADING"
 
           DEDUP=""
