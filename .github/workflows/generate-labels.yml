@@ -124,12 +124,14 @@ jobs:
               f.write("has_work=true\n")
               f.write(f"dates={dates_str}\n")
 
-      - name: Clone gp-features
+      - name: Clone gp-features (derived only)
         if: steps.filter.outputs.has_work == 'true'
         run: |
-          git clone \
+          git clone --filter=blob:none --sparse \
             "https://x-access-token:${{ secrets.LARKSELF_PAT }}@github.com/larkself/gp-features.git" \
             .work/gp-features
+          cd .work/gp-features
+          git sparse-checkout set derived/
 
       - name: Setup Python
         if: steps.filter.outputs.has_work == 'true'
