@@ -94,24 +94,40 @@ jobs:
 
           rm -rf date-repo
 
-      - name: 推送到 gp-features
+      - name: 推送到 feature-{year}
         env:
           PUSH_TOKEN: ${{ secrets.LARKSELF_PAT }}
         run: |
           set -euo pipefail
           DC="${{ inputs.date }}"
           YEAR="${DC:0:4}"
+          REPO="feature-${YEAR}"
+          REPO_URL="https://x-access-token:${PUSH_TOKEN}@github.com/larkself/${REPO}.git"
 
           if [ ! -f "output/${DC}.parquet" ]; then
             echo "⚠️ ${DC}: 无产出文件, 跳过推送"
             exit 0
           fi
 
-          git clone --depth 1 --filter=blob:none --no-tags --sparse \
-            "https://x-access-token:${PUSH_TOKEN}@github.com/larkself/gp-features.git" \
-            gp-features
+          # 检查仓库是否存在，不存在则创建
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+            -H "Authorization: token ${PUSH_TOKEN}" \
+            "https://api.github.com/repos/larkself/${REPO}")
 
-          cd gp-features
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "🆕 创建仓库 larkself/${REPO}"
+            curl -sf -X POST \
+              -H "Authorization: token ${PUSH_TOKEN}" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/user/repos" \
+              -d "{\"name\":\"${REPO}\",\"private\":true,\"auto_init\":true}"
+            sleep 3
+          fi
+
+          git clone --depth 1 --filter=blob:none --no-tags --sparse \
+            "${REPO_URL}" repo-push
+
+          cd repo-push
           git sparse-checkout set base/pankou
           git checkout
 
@@ -134,7 +150,7 @@ jobs:
 
           for TRY in 1 2 3 4 5 6 7 8 9 10; do
             if git push; then
-              echo "✅ ${DC} 推送成功"
+              echo "✅ ${DC} 推送成功 → ${REPO}"
               exit 0
             fi
             echo "⚠️ push 失败, 尝试 rebase 后重试 (${TRY}/10)"
