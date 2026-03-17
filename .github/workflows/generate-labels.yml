@@ -145,16 +145,30 @@ jobs:
 
       - name: Generate labels
         if: steps.filter.outputs.has_work == 'true'
+        id: gen
         run: |
           echo "🔄 生成标签: ${{ steps.filter.outputs.dates }}"
-          python3 stock-grabber/labeling/generate_labels.py \
+          if python3 stock-grabber/labeling/generate_labels.py \
             --target-dates "${{ steps.filter.outputs.dates }}" \
             --derived-dir .work/gp-features/derived \
             --output-dir .work/labels \
-            --trade-date-json stock-grabber/data/trade_date.json
+            --trade-date-json stock-grabber/data/trade_date.json; then
+            echo "has_labels=true" >> "$GITHUB_OUTPUT"
+          else
+            # 部分日期数据不足时 generate_labels.py 会 exit 1,
+            # 但已成功生成的标签仍在 .work/labels/ 中
+            if ls .work/labels/*/*.parquet >/dev/null 2>&1; then
+              echo "⚠️ 部分日期跳过, 但有已生成的标签"
+              echo "has_labels=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "❌ 无任何标签产出"
+              echo "has_labels=false" >> "$GITHUB_OUTPUT"
+              exit 1
+            fi
+          fi
 
       - name: Push labels to gp-{year} repos
-        if: steps.filter.outputs.has_work == 'true'
+        if: steps.filter.outputs.has_work == 'true' && steps.gen.outputs.has_labels == 'true'
         env:
           GH_TOKEN: ${{ secrets.HICCC_PAT }}
         run: |
