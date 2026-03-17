@@ -124,14 +124,12 @@ jobs:
               f.write("has_work=true\n")
               f.write(f"dates={dates_str}\n")
 
-      - name: Clone gp-features (derived only)
+      - name: Clone gp-derived
         if: steps.filter.outputs.has_work == 'true'
         run: |
-          git clone --filter=blob:none --sparse \
-            "https://x-access-token:${{ secrets.LARKSELF_PAT }}@github.com/larkself/gp-features.git" \
-            .work/gp-features
-          cd .work/gp-features
-          git sparse-checkout set derived/
+          git clone --depth 1 \
+            "https://x-access-token:${{ secrets.LARKSELF_PAT }}@github.com/larkself/gp-derived.git" \
+            .work/gp-derived
 
       - name: Setup Python
         if: steps.filter.outputs.has_work == 'true'
@@ -150,7 +148,7 @@ jobs:
           echo "🔄 生成标签: ${{ steps.filter.outputs.dates }}"
           if python3 stock-grabber/labeling/generate_labels.py \
             --target-dates "${{ steps.filter.outputs.dates }}" \
-            --derived-dir .work/gp-features/derived \
+            --derived-dir .work/gp-derived \
             --output-dir .work/labels \
             --trade-date-json stock-grabber/data/trade_date.json; then
             echo "has_labels=true" >> "$GITHUB_OUTPUT"

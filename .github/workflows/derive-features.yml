@@ -67,13 +67,12 @@ jobs:
         id: existing
         if: inputs.force != true
         run: |
-          git clone --depth 1 --filter=blob:none --sparse \
-            "https://x-access-token:${{ secrets.LARKSELF_PAT }}@github.com/larkself/gp-features.git" \
-            .work/gp-features
-          cd .work/gp-features
-          git sparse-checkout set derived/
+          git clone --depth 1 --filter=blob:none --bare \
+            "https://x-access-token:${{ secrets.LARKSELF_PAT }}@github.com/larkself/gp-derived.git" \
+            .work/gp-derived.git
           # 提取已有 derived 日期 (YYYY/market_structure_YYYYMMDD.parquet)
-          EXISTING=$(find derived/ -name "market_structure_*.parquet" 2>/dev/null \
+          EXISTING=$(git -C .work/gp-derived.git ls-tree -r --name-only HEAD \
+            | grep 'market_structure_' \
             | sed 's/.*market_structure_//' | sed 's/\.parquet//' \
             | sort -u | tr '\n' ',' | sed 's/,$//')
           echo "dates=$EXISTING" >> "$GITHUB_OUTPUT"
@@ -153,13 +152,11 @@ jobs:
             data/trade_date.json
             hicccx999
 
-      - name: Clone gp-features (base parquets only)
+      - name: Clone gp-pankou (base parquets)
         run: |
-          git clone --depth 1 --filter=blob:none --sparse \
-            "https://x-access-token:${{ secrets.LARKSELF_PAT }}@github.com/larkself/gp-features.git" \
-            .work/gp-features
-          cd .work/gp-features
-          git sparse-checkout set base/
+          git clone --depth 1 \
+            "https://x-access-token:${{ secrets.LARKSELF_PAT }}@github.com/larkself/gp-pankou.git" \
+            .work/base/pankou
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -174,7 +171,7 @@ jobs:
           echo "🔄 分片 ${{ matrix.shard.id }}: ${{ matrix.shard.dates }}"
           python3 stock-grabber/hicccx999/derive_features.py \
             --target-dates "${{ matrix.shard.dates }}" \
-            --base-dir .work/gp-features/base \
+            --base-dir .work/base \
             --output-dir .work/derived \
             --trade-date-json stock-grabber/data/trade_date.json
 
