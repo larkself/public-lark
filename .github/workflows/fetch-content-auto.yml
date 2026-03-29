@@ -73,8 +73,8 @@ jobs:
                       port=port,
                       password=password,
                       decode_responses=True,
-                      socket_timeout=10,
-                      socket_connect_timeout=10,
+                      socket_timeout=30,
+                      socket_connect_timeout=30,
                   )
                   r.ping()
                   print(f"Redis connected (attempt {attempt})")
@@ -82,7 +82,13 @@ jobs:
               except Exception as e:
                   print(f"Redis connect attempt {attempt}/3 failed: {e}")
                   if attempt == 3:
-                      raise
+                      print("Redis unreachable after 3 attempts, skip this run")
+                      with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+                          f.write("runner_count=0\n")
+                          f.write("total_codes=0\n")
+                          f.write("batch_id=\n")
+                          f.write("lock_token=\n")
+                      exit(0)
                   time.sleep(attempt * 5)
 
           # List batch files sorted ascending (batch_000, batch_001, ...)
@@ -457,15 +463,16 @@ jobs:
                       port=int(os.environ.get("REDIS_PORT") or "6379"),
                       password=os.environ.get("REDIS_PASSWORD") or "",
                       decode_responses=True,
-                      socket_timeout=10,
-                      socket_connect_timeout=10,
+                      socket_timeout=30,
+                      socket_connect_timeout=30,
                   )
                   r.ping()
                   break
               except Exception as e:
                   print(f"Redis connect attempt {attempt}/3 failed: {e}")
                   if attempt == 3:
-                      raise
+                      print("Redis unreachable, lock will expire via TTL")
+                      exit(0)
                   time.sleep(attempt * 5)
           batch_id = os.environ["BATCH_ID"]
           token = os.environ["LOCK_TOKEN"]
@@ -515,15 +522,16 @@ jobs:
                       port=int(os.environ.get("REDIS_PORT") or "6379"),
                       password=os.environ.get("REDIS_PASSWORD") or "",
                       decode_responses=True,
-                      socket_timeout=10,
-                      socket_connect_timeout=10,
+                      socket_timeout=30,
+                      socket_connect_timeout=30,
                   )
                   r.ping()
                   break
               except Exception as e:
                   print(f"Redis connect attempt {attempt}/3 failed: {e}")
                   if attempt == 3:
-                      raise
+                      print("Redis unreachable, lock will expire via TTL")
+                      exit(0)
                   time.sleep(attempt * 5)
           batch_id = os.environ["BATCH_ID"]
           token = os.environ["LOCK_TOKEN"]
