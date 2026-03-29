@@ -51,7 +51,7 @@ jobs:
         id: plan
         run: |
           python3 << 'PYEOF'
-          import gzip, json, math, os, uuid
+          import gzip, json, math, os, time, uuid
           from pathlib import Path
           import redis
 
@@ -59,21 +59,31 @@ jobs:
           MAX_RUNNERS = 20
           LOCK_TTL = 7200  # 2 hours
 
-          # Connect to Redis
+          # Connect to Redis with retry
           host = os.environ.get("REDIS_HOST") or "172.245.39.37"
           port = int(os.environ.get("REDIS_PORT") or "6379")
           password = os.environ.get("REDIS_PASSWORD") or ""
           print(f"Redis: {host}:{port}")
-          r = redis.Redis(
-              host=host,
-              port=port,
-              password=password,
-              decode_responses=True,
-              socket_timeout=5,
-              socket_connect_timeout=5,
-          )
-          r.ping()
-          print("Redis connected")
+
+          r = None
+          for attempt in range(1, 4):
+              try:
+                  r = redis.Redis(
+                      host=host,
+                      port=port,
+                      password=password,
+                      decode_responses=True,
+                      socket_timeout=10,
+                      socket_connect_timeout=10,
+                  )
+                  r.ping()
+                  print(f"Redis connected (attempt {attempt})")
+                  break
+              except Exception as e:
+                  print(f"Redis connect attempt {attempt}/3 failed: {e}")
+                  if attempt == 3:
+                      raise
+                  time.sleep(attempt * 5)
 
           # List batch files sorted ascending (batch_000, batch_001, ...)
           batches_dir = Path("data/content_batches")
@@ -437,16 +447,26 @@ jobs:
           BATCH_ID: ${{ needs.plan.outputs.batch_id }}
         run: |
           python3 << 'PYEOF'
-          import os, redis
+          import os, time, redis
 
-          r = redis.Redis(
-              host=os.environ.get("REDIS_HOST") or "172.245.39.37",
-              port=int(os.environ.get("REDIS_PORT") or "6379"),
-              password=os.environ.get("REDIS_PASSWORD") or "",
-              decode_responses=True,
-              socket_timeout=5,
-              socket_connect_timeout=5,
-          )
+          r = None
+          for attempt in range(1, 4):
+              try:
+                  r = redis.Redis(
+                      host=os.environ.get("REDIS_HOST") or "172.245.39.37",
+                      port=int(os.environ.get("REDIS_PORT") or "6379"),
+                      password=os.environ.get("REDIS_PASSWORD") or "",
+                      decode_responses=True,
+                      socket_timeout=10,
+                      socket_connect_timeout=10,
+                  )
+                  r.ping()
+                  break
+              except Exception as e:
+                  print(f"Redis connect attempt {attempt}/3 failed: {e}")
+                  if attempt == 3:
+                      raise
+                  time.sleep(attempt * 5)
           batch_id = os.environ["BATCH_ID"]
           token = os.environ["LOCK_TOKEN"]
           lock_key = f"gp-announce:content-batch:{batch_id}:lock"
@@ -485,16 +505,26 @@ jobs:
           BATCH_ID: ${{ needs.plan.outputs.batch_id }}
         run: |
           python3 << 'PYEOF'
-          import os, redis
+          import os, time, redis
 
-          r = redis.Redis(
-              host=os.environ.get("REDIS_HOST") or "172.245.39.37",
-              port=int(os.environ.get("REDIS_PORT") or "6379"),
-              password=os.environ.get("REDIS_PASSWORD") or "",
-              decode_responses=True,
-              socket_timeout=5,
-              socket_connect_timeout=5,
-          )
+          r = None
+          for attempt in range(1, 4):
+              try:
+                  r = redis.Redis(
+                      host=os.environ.get("REDIS_HOST") or "172.245.39.37",
+                      port=int(os.environ.get("REDIS_PORT") or "6379"),
+                      password=os.environ.get("REDIS_PASSWORD") or "",
+                      decode_responses=True,
+                      socket_timeout=10,
+                      socket_connect_timeout=10,
+                  )
+                  r.ping()
+                  break
+              except Exception as e:
+                  print(f"Redis connect attempt {attempt}/3 failed: {e}")
+                  if attempt == 3:
+                      raise
+                  time.sleep(attempt * 5)
           batch_id = os.environ["BATCH_ID"]
           token = os.environ["LOCK_TOKEN"]
           lock_key = f"gp-announce:content-batch:{batch_id}:lock"
