@@ -110,11 +110,20 @@ jobs:
           locked_batch = None
           locked_file = None
 
-          # Build batch_id → file mapping
+          # Build batch_id → file mapping (sorted ascending)
+          import random
           batch_map: dict[str, Path] = {}
           for bf in batch_files:
               bid = bf.stem.split("_", 1)[1].split(".")[0]
               batch_map[bid] = bf
+
+          # Randomize within a window to reduce contention across parallel workflows
+          WINDOW = 50
+          all_bids = list(batch_map.keys())  # already sorted from batch_files
+          head = all_bids[:WINDOW]
+          tail = all_bids[WINDOW:]
+          random.shuffle(head)
+          ordered_bids = head + tail
 
           # Lua: try SET NX EX on each key, return the first one that succeeds
           lock_lua = """
@@ -127,7 +136,7 @@ jobs:
           end
           return nil
           """
-          lock_keys = [f"gp-announce:content-batch:{bid}:lock" for bid in batch_map]
+          lock_keys = [f"gp-announce:content-batch:{bid}:lock" for bid in ordered_bids]
           result = r.eval(lock_lua, len(lock_keys), *lock_keys, token, LOCK_TTL)
           if result:
               # result is the key that was locked, e.g. "gp-announce:content-batch:042:lock"
