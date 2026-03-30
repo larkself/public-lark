@@ -318,7 +318,7 @@ jobs:
           # Add new parquet files by explicit path (works under sparse-checkout)
           if new_parquets:
               subprocess.run(
-                  ["git", "add"] + new_parquets,
+                  ["git", "add", "--sparse"] + new_parquets,
                   cwd=str(repo_root), check=True,
               )
           # Stage the batch file deletion (already in sparse-checkout cone)
