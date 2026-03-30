@@ -314,18 +314,22 @@ jobs:
               batch_file.unlink()
               print(f"Removed batch file: batch_{batch_id}.json.gz")
 
-          # ── 3. Stage everything ──
+          # ── 3. Stage new parquets + batch file deletion ──
+          # Add new parquet files by explicit path (works under sparse-checkout)
+          if new_parquets:
+              subprocess.run(
+                  ["git", "add"] + new_parquets,
+                  cwd=str(repo_root), check=True,
+              )
+          # Stage the batch file deletion (already in sparse-checkout cone)
           subprocess.run(
-              ["git", "add", "raw/content/", "data/content_batches/"],
+              ["git", "add", "data/content_batches/"],
               cwd=str(repo_root), check=True,
           )
           print("Staged all changes")
           PYEOF
 
-          # Disable sparse-checkout so git add works for all paths
-          git sparse-checkout disable
-
-          # Run the merge script
+          # Run the merge script (no need to disable sparse-checkout)
           python3 /tmp/merge_and_stage.py
 
           if git diff --cached --quiet; then
